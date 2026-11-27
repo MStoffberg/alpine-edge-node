@@ -94,7 +94,14 @@ if [ ! -x /opt/adguardhome/AdGuardHome ]; then
 else
   info 'Existing AdGuard binary found; leaving it and its configuration intact.'
 fi
-if ! id adguard >/dev/null 2>&1; then adduser -S -D -H -s /sbin/nologin adguard; fi
+# Alpine BusyBox adduser -S does not guarantee a same-named group.
+# Explicitly create the group, including when repairing a partial installation.
+if ! grep -q '^adguard:' /etc/group; then addgroup -S adguard; fi
+if ! id adguard >/dev/null 2>&1; then
+  adduser -S -D -H -G adguard -s /sbin/nologin adguard
+else
+  addgroup adguard adguard 2>/dev/null || true
+fi
 mkdir -p /etc/adguardhome /var/lib/adguard
 chown -R adguard:adguard /etc/adguardhome /var/lib/adguard
 chmod 700 /etc/adguardhome /var/lib/adguard
