@@ -69,8 +69,17 @@ rc-service sshd start >/dev/null 2>&1 || true
 rc-update add chronyd default >/dev/null 2>&1 || true
 rc-service chronyd start >/dev/null 2>&1 || true
 
-info 'Downloading official AdGuard Home binary with published SHA-256 check'
-if [ ! -x /opt/adguardhome/AdGuardHome ]; then
+info 'Checking AdGuard Home executable (not just its path)'
+adguard_target=/opt/adguardhome/AdGuardHome
+adguard_binary_valid() {
+  [ -f "$1" ] && [ -x "$1" ] || return 1
+  binary_magic="$(od -An -tx1 -N4 "$1" 2>/dev/null | tr -d '[:space:]')"
+  [ "$binary_magic" = 7f454c46 ]
+}
+if adguard_binary_valid "$adguard_target"; then
+  info 'Existing AdGuard executable verified; preserving binary and settings.'
+else
+  info 'AdGuard binary missing or invalid. Repairing from a checksum-verified release.'
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
   curl -fsSL --retry 3 --connect-timeout 15 --max-time 90 \
@@ -78,21 +87,42 @@ if [ ! -x /opt/adguardhome/AdGuardHome ]; then
   url="$(jq -er '.assets[] | select(.name=="AdGuardHome_linux_amd64.tar.gz") | .browser_download_url' "$tmp/release.json")" ||
     fail 'AdGuard amd64 asset missing.'
   digest="$(jq -er '.assets[] | select(.name=="AdGuardHome_linux_amd64.tar.gz") | .digest' "$tmp/release.json")" ||
-    fail 'AdGuard SHA-256 digest missing.'
+    fail 'AdGuard release SHA-256 digest missing.'
   printf '%s\n' "$digest" | grep -Eq '^sha256:[a-fA-F0-9]{64}$' ||
     fail 'AdGuard digest invalid; refusing unverified download.'
   curl -fsSL --retry 3 --connect-timeout 15 --max-time 300 "$url" -o "$tmp/adguard.tgz"
   printf '%s  %s\n' "$(printf '%s' "$digest" | cut -d: -f2)" "$tmp/adguard.tgz" |
     sha256sum -c - || fail 'AdGuard checksum failed.'
+  mkdir -p "$tmp/unpack"
+  tar -xzf "$tmp/adguard.tgz" -C "$tmp/unpack" ||
+    fail 'AdGuard archive extraction failed.'
+  # Locate the actual executable, even if the archive has nested directories.
+  extracted_binary="$(find "$tmp/unpack" -type f -name AdGuardHome -print -quit)"
+  [ -n "$extracted_binary" ] || fail 'No AdGuard executable found in verified archive.'
+  adguard_binary_valid "$extracted_binary" ||
+    fail 'Extracted AdGuard executable is not a valid ELF binary.'
   mkdir -p /opt/adguardhome
-  tar -xzf "$tmp/adguard.tgz" -C /opt/adguardhome --strip-components=1
-  test -x /opt/adguardhome/AdGuardHome || fail 'AdGuard binary missing.'
-  chown -R root:root /opt/adguardhome
-  chmod 755 /opt/adguardhome/AdGuardHome
+  # The old bootstrap sometimes created a *directory* named AdGuardHome.
+  # Preserve any existing data instead of deleting or overwriting it.
+  if [ -e "$adguard_target" ] || [ -L "$adguard_target" ]; then
+    backup="$adguard_target.invalid.$(date +%Y%m%d%H%M%S)"
+    [ ! -e "$backup" ] || fail "Backup path already exists: $backup"
+    mv "$adguard_target" "$backup" ||
+      fail 'Cannot move invalid AdGuard path aside.'
+    chmod -R go-rwx "$backup" || true
+    info "Preserved invalid AdGuard path at $backup"
+  fi
+  cp "$extracted_binary" "$adguard_target.new.$$" ||
+    fail 'Cannot stage AdGuard binary.'
+  chmod 755 "$adguard_target.new.$$"
+  chown root:root "$adguard_target.new.$$"
+  mv "$adguard_target.new.$$" "$adguard_target" ||
+    fail 'Cannot install AdGuard executable.'
+  adguard_binary_valid "$adguard_target" ||
+    fail 'Installed AdGuard executable did not validate.'
   rm -rf "$tmp"
   trap - EXIT
-else
-  info 'Existing AdGuard binary found; leaving it and its configuration intact.'
+  info 'Verified AdGuard executable installed successfully.'
 fi
 # Alpine BusyBox adduser -S does not guarantee a same-named group.
 # Explicitly create the group, including when repairing a partial installation.
