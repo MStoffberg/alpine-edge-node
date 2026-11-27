@@ -74,3 +74,23 @@ df -h /
 After a reboot verify SSH, AdGuard DNS, NetBird P2P/relay status and playback from House 3. The old VIA CPU may limit VPN throughput; measure before committing to continuous multi-camera remote viewing.
 
 References: [Alpine OpenRC](https://docs.alpinelinux.org/user-handbook/0.1a/Working/openrc.html), [NetBird Alpine install](https://docs.netbird.io/get-started/install/linux), [NetBird network resources](https://docs.netbird.io/manage/networks), [AdGuard Home](https://adguard-dns.io/kb/adguard-home/getting-started/).
+
+
+## Troubleshooting partial installations
+
+If `bootstrap.sh` previously exited with `chown: unknown user/group adguard:adguard`, download and rerun the **latest** `bootstrap.sh` from `master`. The updated script explicitly creates the `adguard` group and recovers existing accounts and binaries. It does not format the disk or disable SSH.
+
+If NetBird previously failed with `netbird (no such package)`, download and rerun the **latest** `configure-netbird.sh`. It enables the `community` repository for the **same Alpine stable version already in use** (for example `v3.24/community`) and installs `netbird` and `netbird-openrc` from Alpine's APK repositories.
+
+Verify:
+
+```sh
+getent group adguard || grep '^adguard:' /etc/group
+rc-service adguardhome status
+rc-service netbird status
+netbird status -d
+```
+
+If `rc-service adguardhome status` is stopped, inspect `/var/log/messages` (or syslog) and `rc-service adguardhome start`. The AdGuard wizard is available on the edge node's LAN IP port 3000 once it is running.
+
+**Security:** Run `finalize-ssh.sh` only after validating a second SSH login with the public key; it deliberately does not run automatically. The optional host firewall can affect connectivity, so confirm console access first.
