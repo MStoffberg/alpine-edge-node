@@ -4,11 +4,24 @@ set -Eeuo pipefail
 [ "$(id -u)" -eq 0 ] || { echo 'Run as root.' >&2; exit 1; }
 [ -f /etc/alpine-release ] || { echo 'Alpine Linux required.' >&2; exit 1; }
 if [ ! -e /etc/init.d/netbird ]; then
-  echo 'Installing NetBird from the Alpine Community repository.'
+  echo 'Installing NetBird using the matching Alpine Community repository.'
+  repo_file=/etc/apk/repositories
+  branch="v$(cut -d. -f1,2 /etc/alpine-release)"
+  main_repo="$(awk -v b="$branch" '$0 ~ "^https?://.*/" b "/main$" {print; exit}' "$repo_file")"
+  if [ -z "$main_repo" ]; then
+    echo "No enabled $branch/main repository found. Inspect $repo_file." >&2
+    exit 1
+  fi
+  community_repo="${main_repo%/main}/community"
+  if ! grep -Fxq "$community_repo" "$repo_file"; then
+    cp -p "$repo_file" "$repo_file.edge-backup.$(date +%Y%m%d%H%M%S)"
+    printf '%s\n' "$community_repo" >> "$repo_file"
+    printf 'Enabled %s\n' "$community_repo"
+  fi
   apk update
   if ! apk add netbird netbird-openrc; then
-    echo 'Enable the Community repository for your SAME Alpine stable release, then retry.' >&2
-    echo 'Do not mix stable and edge package repositories.' >&2
+    echo "NetBird package installation failed. Verify $repo_file and apk policy netbird." >&2
+    echo 'Never mix Alpine stable with edge repositories.' >&2
     exit 1
   fi
 fi
