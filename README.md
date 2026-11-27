@@ -104,3 +104,16 @@ To rerun after a partial failure, download the latest bootstrap, choose the **ex
 ### Alpine does not install `sudo` by default
 
 When your prompt ends with `#`, you are already root and run commands directly (for example `apk update`). From your normal `keiki` account, use `doas apk update`: the bootstrap installs `doas` and grants the configured admin the `wheel` group. Verify from the non-root account with `doas id`. You may explicitly install `sudo` with `apk add sudo` as root if you prefer, but `doas` uses less space on this 8GB edge device.
+
+### AdGuard `executable is not a regular file`
+
+Older bootstrap versions used `-x /opt/adguardhome/AdGuardHome` to detect the program. A directory also satisfies `-x`, so a partially extracted archive could be mistaken for a valid executable. The current bootstrap validates a real ELF executable, downloads and checks the official release checksum, then installs only the binary from the archive. If an invalid target already exists, it is **moved into a timestamped `/opt/adguardhome/AdGuardHome.invalid.*` backup**; it is not deleted. It does not touch `/etc/adguardhome` or `/var/lib/adguard`.
+
+To inspect the system without making changes:
+
+```sh
+ls -ld /opt/adguardhome /opt/adguardhome/AdGuardHome
+find /opt/adguardhome -maxdepth 4 -name AdGuardHome -print
+```
+
+After fetching the updated script, rerun with the **existing** admin username and public key. Do not delete any directory manually.
