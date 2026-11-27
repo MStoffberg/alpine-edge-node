@@ -94,3 +94,13 @@ netbird status -d
 If `rc-service adguardhome status` is stopped, inspect `/var/log/messages` (or syslog) and `rc-service adguardhome start`. The AdGuard wizard is available on the edge node's LAN IP port 3000 once it is running.
 
 **Security:** Run `finalize-ssh.sh` only after validating a second SSH login with the public key; it deliberately does not run automatically. The optional host firewall can affect connectivity, so confirm console access first.
+
+### AdGuard `setcap`: "Invalid file for capability operation"
+
+Some filesystems, mount configurations or links don't support Linux file capabilities. The bootstrap now attempts to grant `CAP_NET_BIND_SERVICE` to the resolved executable; if that fails, it **asks permission** to apply the alternative `net.ipv4.ip_unprivileged_port_start=53` setting, which permits all local users to bind ports **53–1023**, not only AdGuard. This is a host-wide security tradeoff, but AdGuard itself continues running under the unprivileged `adguard` account, not root. The setting persists in `/etc/sysctl.d/91-adguard-unprivileged-ports.conf`, enabled through the OpenRC `sysctl` boot service.
+
+To rerun after a partial failure, download the latest bootstrap, choose the **existing** administrator username and hostname, and paste the same SSH *public* key. The script preserves AdGuard configuration and does not overwrite router settings.
+
+### Alpine does not install `sudo` by default
+
+When your prompt ends with `#`, you are already root and run commands directly (for example `apk update`). From your normal `keiki` account, use `doas apk update`: the bootstrap installs `doas` and grants the configured admin the `wheel` group. Verify from the non-root account with `doas id`. You may explicitly install `sudo` with `apk add sudo` as root if you prefer, but `doas` uses less space on this 8GB edge device.
