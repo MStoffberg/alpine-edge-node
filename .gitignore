@@ -1,0 +1,8 @@
+edge-node.env
+.env
+*.key
+*.pem
+*.bak
+secrets/
+backups/
+*.log
