@@ -105,8 +105,33 @@ fi
 mkdir -p /etc/adguardhome /var/lib/adguard
 chown -R adguard:adguard /etc/adguardhome /var/lib/adguard
 chmod 700 /etc/adguardhome /var/lib/adguard
-setcap 'cap_net_bind_service=+ep' /opt/adguardhome/AdGuardHome ||
-  fail 'Cannot grant non-root binding of DNS port 53.'
+# Prefer the narrow CAP_NET_BIND_SERVICE permission. Some small flash
+# filesystems and symlinks do not support Linux file capabilities.
+adguard_binary="$(readlink -f /opt/adguardhome/AdGuardHome)"
+[ -f "$adguard_binary" ] || fail 'AdGuard executable is not a regular file.'
+magic="$(head -c 4 "$adguard_binary" | od -An -tx1 | tr -d '[:space:]')"
+[ "$magic" = 7f454c46 ] || fail 'AdGuard executable is not an ELF binary; refusing to run it.'
+if setcap 'cap_net_bind_service=+ep' "$adguard_binary"; then
+  info 'AdGuard received CAP_NET_BIND_SERVICE for DNS port 53.'
+else
+  printf '[edge WARNING] File capabilities unavailable on this filesystem.\n' >&2
+  printf '[edge WARNING] Alternative: permit unprivileged binding on ports 53-1023\n' >&2
+  printf '[edge WARNING] for ALL local users (AdGuard will still run as its own user).\n' >&2
+  # Limit the fallback to an explicit approval when attached to a terminal.
+  if [ -t 0 ]; then
+    read -r -p 'Apply this system-wide port setting? [y/N] ' permission
+    case "$permission" in y|Y) ;; *) fail 'Stopped before starting AdGuard; no firewall/SSH changes.';; esac
+  else
+    fail 'A terminal is needed to approve the non-root DNS port fallback.'
+  fi
+  sysctl -w net.ipv4.ip_unprivileged_port_start=53 >/dev/null ||
+    fail 'Kernel does not support unprivileged port fallback; AdGuard was not started.'
+  mkdir -p /etc/sysctl.d
+  printf 'net.ipv4.ip_unprivileged_port_start=53\n' > /etc/sysctl.d/91-adguard-unprivileged-ports.conf
+  rc-update add sysctl boot >/dev/null 2>&1 ||
+    fail 'Cannot enable persistent sysctl service; inspect OpenRC sysctl support.'
+  info 'Non-root AdGuard port 53 fallback enabled and persistent across reboots.'
+fi
 cat > /etc/init.d/adguardhome <<'INIT'
 #!/sbin/openrc-run
 name="AdGuard Home"
