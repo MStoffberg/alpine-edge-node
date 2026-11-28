@@ -4,16 +4,12 @@
 set -Eeuo pipefail
 [ "$(id -u)" -eq 0 ] || { echo 'Run as root/doas.' >&2; exit 1; }
 command -v nft >/dev/null || { echo 'Install nftables first (bootstrap.sh).' >&2; exit 1; }
-LAN_IF="$(ip -4 route show default | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1);exit}}')"
+LAN_IF="$(ip -4 route show default | awk '!found {for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1);found=1}}')"
 [ -n "$LAN_IF" ] || { echo 'No default LAN interface detected.' >&2; exit 1; }
-LAN_CIDR="$(ip -4 route show dev "$LAN_IF" scope link | awk '$1 ~ /^[0-9]+\./ && $1 ~ /\// {print $1;exit}')"
+LAN_CIDR="$(ip -4 route show dev "$LAN_IF" scope link | awk '$1 ~ /^[0-9]+\./ && $1 ~ /\// && !found {print $1;found=1}')"
 [ -n "$LAN_CIDR" ] || { echo 'Could not find LAN subnet.' >&2; exit 1; }
 printf '%s\n' "$LAN_IF" | grep -Eq '^[A-Za-z0-9_.-]+$' || exit 1
 printf '%s\n' "$LAN_CIDR" | grep -Eq '^[0-9.]+/[0-9]{1,2}$' || exit 1
-if nft list table inet edge_input >/dev/null 2>&1; then
-  echo 'edge_input firewall is already active; refusing to overwrite it.'
-  exit 0
-fi
 printf '\nLocal interface: %s, subnet %s\n' "$LAN_IF" "$LAN_CIDR"
 printf 'Host firewall allows LAN/NetBird SSH, AdGuard web UI, DNS.\n'
 printf 'It does NOT block forwarded NetBird-to-NVR traffic; NetBird manages resource policies.\n'
@@ -31,6 +27,7 @@ table inet edge_input {
     ip protocol icmp accept
     meta l4proto ipv6-icmp accept
     iifname "$LAN_IF" udp sport 67 udp dport 68 accept
+    udp dport 51820 accept comment "NetBird WireGuard direct peers"
     iifname "$LAN_IF" ip saddr $LAN_CIDR tcp dport { 22, 53, 80, 3000 } accept
     iifname "$LAN_IF" ip saddr $LAN_CIDR udp dport 53 accept
     iifname "wt0" tcp dport { 22, 53, 80, 3000 } accept
@@ -38,19 +35,47 @@ table inet edge_input {
   }
 }
 RULES
-nft -c -f /etc/edge-node/firewall.nft ||
-  { echo 'Firewall validation failed; nothing activated.' >&2; exit 1; }
+if nft list table inet edge_input >/dev/null 2>&1; then
+  (
+    transaction="$(mktemp /run/edge-firewall-validate.XXXXXX)"
+    trap 'rm -f "$transaction"' EXIT HUP INT TERM
+    chmod 600 "$transaction" || exit 1
+    printf 'delete table inet edge_input\n' > "$transaction" || exit 1
+    cat /etc/edge-node/firewall.nft >> "$transaction" || exit 1
+    nft -c -f "$transaction"
+  ) || { echo 'Firewall replacement validation failed; nothing activated.' >&2; exit 1; }
+else
+  nft -c -f /etc/edge-node/firewall.nft ||
+    { echo 'Firewall validation failed; nothing activated.' >&2; exit 1; }
+fi
 cat > /etc/init.d/edge-firewall <<'SERVICE'
 #!/sbin/openrc-run
 description="Private edge host firewall (only table inet edge_input)"
+extra_started_commands="reload"
+description_reload="Atomically reload edge host firewall"
 depend() { need net; before netbird; }
+apply_rules() {
+  if nft list table inet edge_input >/dev/null 2>&1; then
+    (
+      transaction="$(mktemp /run/edge-firewall.XXXXXX)" || exit 1
+      trap 'rm -f "$transaction"' EXIT HUP INT TERM
+      chmod 600 "$transaction" || exit 1
+      printf 'delete table inet edge_input\n' > "$transaction" || exit 1
+      cat /etc/edge-node/firewall.nft >> "$transaction" || exit 1
+      nft -f "$transaction"
+    )
+  else
+    nft -f /etc/edge-node/firewall.nft
+  fi
+}
 start() {
   ebegin "Installing edge host firewall"
-  if nft list table inet edge_input >/dev/null 2>&1; then
-    eend 0
-    return 0
-  fi
-  nft -f /etc/edge-node/firewall.nft
+  apply_rules
+  eend $?
+}
+reload() {
+  ebegin "Reloading edge host firewall"
+  apply_rules
   eend $?
 }
 stop() {
@@ -60,7 +85,11 @@ stop() {
 }
 SERVICE
 chmod 755 /etc/init.d/edge-firewall
-rc-service edge-firewall start || exit 1
+if rc-service edge-firewall status >/dev/null 2>&1; then
+  rc-service edge-firewall reload || exit 1
+else
+  rc-service edge-firewall start || exit 1
+fi
 rc-update add edge-firewall default
 printf '\nFirewall enabled, and will be restored on reboot.\n'
 printf 'Recovery at local console: rc-service edge-firewall stop; rc-update del edge-firewall default\n'

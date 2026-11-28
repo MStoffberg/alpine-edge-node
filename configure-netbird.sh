@@ -32,7 +32,7 @@ rc-update add netbird default >/dev/null 2>&1 || true
 rc-service netbird start
 cat <<'STEPS'
 
-NetBird daemon installed and enabled on reboot.
+NetBird daemon installed but not enrolled; service enabled on reboot.
 Enroll in FREE managed Cloud:
 
   netbird up

@@ -1,4 +1,4 @@
-name: Bash syntax
+name: Edge-node contracts
 on:
   push:
   pull_request:
@@ -7,9 +7,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate scripts
-        run: |
-          bash -n bootstrap.sh
-          bash -n configure-netbird.sh
-          bash -n finalize-ssh.sh
-          bash -n enable-firewall.sh
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Run contract suite
+        run: bash tests/contract.sh
+      - name: Run ShellCheck
+        run: shellcheck -x bootstrap.sh configure-netbird.sh finalize-ssh.sh enable-firewall.sh provision.sh lib/edge-lib.sh tests/contract.sh

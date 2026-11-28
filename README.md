@@ -1,119 +1,112 @@
-# Alpine Edge Node (HP t510)
+# Alpine Edge Node
 
-A small Alpine Linux **post-install kit** for the three-house CCTV project. Each HP t510 runs **AdGuard Home + NetBird Cloud**; existing Hikvision NVRs continue recording to their **own local HDDs**. House 3 connects to the NVRs for live view and playback over NetBird.
+Idempotent Alpine/OpenRC provisioning for the low-resource edge nodes in the three-house CCTV network. Each node provides local AdGuard Home DNS and a NetBird routing peer; NVRs continue recording locally.
 
-## Architecture
+## Security contract
+
+- Repository provisioning scripts are pinned to one exact 40-character Git commit; AdGuard artifacts are separately authenticated with their official SHA-256 digest.
+- Existing authorized keys and AdGuard configuration/data are preserved.
+- AdGuard releases require the official SHA-256 digest and an ELF executable.
+- AdGuard runs as its own account with only `CAP_NET_BIND_SERVICE`.
+- The temporary root-required first-run API binds only to `127.0.0.1`; the persistent service then runs as `adguard`.
+- NetBird is installed but never enrolled with a key embedded in Git or shell history.
+- The firewall owns only `table inet edge_input`; it never clears NetBird tables or adds a forward hook.
+- Provisioning never disables password/root SSH in the same session that installs keys.
+
+The scripts do not partition disks, change interface configuration, become a DHCP server, expose NVR ports, or advertise a NetBird exit route.
+
+## Prerequisites
+
+- Persistent Alpine x86_64 with OpenRC and at least 450 MB free on `/`
+- Existing non-root administrator, normally `keiki`, with console/recovery access
+- Different LAN subnets at each house
+- A reviewed commit SHA from this repository
+
+## Phase 1: one-line provisioning
+
+These commands are pinned to the reviewed 40-character commit. Run them as root from the Alpine console.
+
+### Loki
+
+```sh
+COMMIT=81224a0aa45962d421f0e30a3c1f169d8afcfde4; apk add --no-cache bash curl ca-certificates && curl -fsSL "https://raw.githubusercontent.com/MStoffberg/alpine-edge-node/$COMMIT/provision.sh" | bash -s -- --repo-commit "$COMMIT" --hostname loki --admin-user keiki --ssh-key-url https://github.com/MStoffberg.keys --enable-firewall
+```
+
+### Freya
+
+```sh
+COMMIT=81224a0aa45962d421f0e30a3c1f169d8afcfde4; apk add --no-cache bash curl ca-certificates && curl -fsSL "https://raw.githubusercontent.com/MStoffberg/alpine-edge-node/$COMMIT/provision.sh" | bash -s -- --repo-commit "$COMMIT" --hostname freya --admin-user keiki --ssh-key-url https://github.com/MStoffberg.keys --enable-firewall
+```
+
+The command is rerunnable. It configures the OS, SSH keys, AdGuard, NetBird service, health checks, and firewall, but deliberately leaves current SSH recovery methods enabled.
+
+## Phase 2: external verification and SSH hardening
+
+From another computer, prove key login and DNS first:
+
+```sh
+ssh -i ~/.ssh/<matching-key> keiki@<edge-ip>
+nslookup example.com <edge-ip>
+```
+
+Only after that succeeds, download `finalize-ssh.sh` from the **same commit**, inspect it, and run it locally through `doas` or the physical console:
+
+```sh
+COMMIT=81224a0aa45962d421f0e30a3c1f169d8afcfde4
+curl -fsSLo /tmp/finalize-ssh.sh "https://raw.githubusercontent.com/MStoffberg/alpine-edge-node/$COMMIT/finalize-ssh.sh"
+bash -n /tmp/finalize-ssh.sh
+doas bash /tmp/finalize-ssh.sh keiki
+```
+
+Type `TESTED` only when the separate key session remains open. The script validates sshd configuration, keeps a backup, and rolls back if restart fails.
+
+## First-run credentials
+
+A new AdGuard installation receives a generated password that is never printed. It is temporarily stored in the root-only file:
 
 ```text
-House 1: cameras -> local Hikvision NVR/HDD -- LAN -- HP t510 (AdGuard + NetBird)
-House 2: cameras -> local NVR/HDD ---------- LAN -- HP t510 (AdGuard + NetBird)
-House 3: local NVR/HDD + viewer/HA + NetBird peer
-                            \-- encrypted NetBird P2P --/
+/root/edge-node-secrets/adguard-bootstrap-password
 ```
 
-Use different LAN subnets at each house. Use NetBird Cloud's **Networks / Resources** dashboard to advertise the remote NVR **LAN IP /32** through each house's t510 as routing peer, with **Masquerade enabled** and access restricted to House 3's viewer peer/group. No internet-facing NVR ports. The t510 does **not** become a router for all internet traffic.
+Move it to Vaultwarden, verify authenticated API access, then delete the temporary file. Existing installations keep their current credentials and configuration.
 
-## Important safety notes
-
-- Alpine Linux **x86_64, OpenRC, installed to internal storage in sys/disk mode**, not running as a live/diskless USB system.
-- Keep a screen/keyboard or physical recovery access while changing SSH and firewall settings.
-- The installer does not partition, format, disable DHCP on the router, modify network interfaces, or forward public ports.
-- Supply your own **SSH PUBLIC key** (never upload any private key, NetBird setup key, AdGuard password or VPN state).
-- Review scripts before running as root. The first install does **not** disable root/password SSH; explicitly run `finalize-ssh.sh` after a working second key-based SSH session.
-- Only enable the optional local nftables firewall after verifying access. It creates its own table and **does not flush NetBird-managed firewall rules**. A wrongly configured firewall can still cut off remote access.
-- 8 GB flash: disable persistent AdGuard query logging / use short retention; no NVR recording or swap on this box. UPS recommended.
-- Never expose port 53, 3000 or SSH on the public internet.
-
-## Quick start
-
-On Alpine as root, with your current internet/DNS still working:
+NetBird enrollment is separate:
 
 ```sh
-apk add bash curl ca-certificates
-curl -fsSLo /root/edge-bootstrap.sh https://raw.githubusercontent.com/MStoffberg/alpine-edge-node/master/bootstrap.sh
-less /root/edge-bootstrap.sh  # or cat to inspect
-bash /root/edge-bootstrap.sh
-```
-
-Prompts: administrator username, hostname, local SSH **public** key. It upgrades OS packages, creates the admin account, installs AdGuard Home verified by published GitHub SHA-256, sets up OpenRC services, basic low-write logging, chrony, health checks and sysctl hardening.
-
-Then:
-
-```sh
-# Obtain the helpers; inspect each before running
-curl -fsSLo /root/configure-netbird.sh https://raw.githubusercontent.com/MStoffberg/alpine-edge-node/master/configure-netbird.sh
-curl -fsSLo /root/finalize-ssh.sh https://raw.githubusercontent.com/MStoffberg/alpine-edge-node/master/finalize-ssh.sh
-curl -fsSLo /root/enable-firewall.sh https://raw.githubusercontent.com/MStoffberg/alpine-edge-node/master/enable-firewall.sh
-
-bash /root/configure-netbird.sh
 netbird up
 netbird status -d
 ```
 
-`netbird up` requires interactive authentication into **your NetBird Cloud account**. Nothing in this repository contains setup keys. For NetBird cloud management, visit https://app.netbird.io/. No VPS is needed.
+In NetBird Cloud, advertise only the NVR IP as a `/32` resource through the house edge node. Grant only House 3 viewers and never advertise `0.0.0.0/0`.
 
-Complete AdGuard first-run setup at `http://<edge-LAN-IP>:3000`. Set DNS to port 53, the web UI to 3000, and a strong local admin password. Test `nslookup example.com <edge-LAN-IP>` before pointing your router's DHCP DNS to the edge node. Leave DHCP on your existing router.
-
-**Test SSH in a second terminal:** `ssh -i ~/.ssh/id_ed25519 edgeadmin@<edge-LAN-IP>`. Then run `bash /root/finalize-ssh.sh edgeadmin` from console or with `doas`. Optionally run `bash /root/enable-firewall.sh` afterward, with recovery access.
-
-## AdGuard sync
-
-Run [adguardhome-sync](https://github.com/bakito/adguardhome-sync) **at House 3** and target each house's AdGuard UI over VPN. To access the LAN address of the edge node remotely, advertise that IP as a NetBird network resource and allow the correct dashboard/sync peer. Do not publish credentials or sync configuration in this repo.
-
-## Maintenance
+## Acceptance checks
 
 ```sh
-apk update && apk upgrade
 rc-service adguardhome status
 rc-service netbird status
-netbird status -d
 /usr/local/sbin/edge-health --verbose
-df -h /
-```
-
-After a reboot verify SSH, AdGuard DNS, NetBird P2P/relay status and playback from House 3. The old VIA CPU may limit VPN throughput; measure before committing to continuous multi-camera remote viewing.
-
-References: [Alpine OpenRC](https://docs.alpinelinux.org/user-handbook/0.1a/Working/openrc.html), [NetBird Alpine install](https://docs.netbird.io/get-started/install/linux), [NetBird network resources](https://docs.netbird.io/manage/networks), [AdGuard Home](https://adguard-dns.io/kb/adguard-home/getting-started/).
-
-
-## Troubleshooting partial installations
-
-If `bootstrap.sh` previously exited with `chown: unknown user/group adguard:adguard`, download and rerun the **latest** `bootstrap.sh` from `master`. The updated script explicitly creates the `adguard` group and recovers existing accounts and binaries. It does not format the disk or disable SSH.
-
-If NetBird previously failed with `netbird (no such package)`, download and rerun the **latest** `configure-netbird.sh`. It enables the `community` repository for the **same Alpine stable version already in use** (for example `v3.24/community`) and installs `netbird` and `netbird-openrc` from Alpine's APK repositories.
-
-Verify:
-
-```sh
-getent group adguard || grep '^adguard:' /etc/group
-rc-service adguardhome status
-rc-service netbird status
+ss -lntup
+nft list table inet edge_input
 netbird status -d
+sshd -T | grep -E '^(permitrootlogin|passwordauthentication|kbdinteractiveauthentication|pubkeyauthentication|allowusers)'
 ```
 
-If `rc-service adguardhome status` is stopped, inspect `/var/log/messages` (or syslog) and `rc-service adguardhome start`. The AdGuard wizard is available on the edge node's LAN IP port 3000 once it is running.
+After hardening, expected SSH state is: root/password/keyboard-interactive authentication disabled, public-key authentication enabled, and only the configured administrator allowed.
 
-**Security:** Run `finalize-ssh.sh` only after validating a second SSH login with the public key; it deliberately does not run automatically. The optional host firewall can affect connectivity, so confirm console access first.
+Reboot and repeat SSH, DNS, service, firewall, and NetBird checks before treating the node as power-loss resilient.
 
-### AdGuard `setcap`: "Invalid file for capability operation"
+## CCTV and Hestoria
 
-Some filesystems, mount configurations or links don't support Linux file capabilities. The bootstrap now attempts to grant `CAP_NET_BIND_SERVICE` to the resolved executable; if that fails, it **asks permission** to apply the alternative `net.ipv4.ip_unprivileged_port_start=53` setting, which permits all local users to bind ports **53–1023**, not only AdGuard. This is a host-wide security tradeoff, but AdGuard itself continues running under the unprivileged `adguard` account, not root. The setting persists in `/etc/sysctl.d/91-adguard-unprivileged-ports.conf`, enabled through the OpenRC `sysctl` boot service.
+Keep DHCP on each house router and high-resolution recording on each local NVR. Run `adguardhome-sync` at House 3 over NetBird. Use substreams for multi-camera remote views.
 
-To rerun after a partial failure, download the latest bootstrap, choose the **existing** administrator username and hostname, and paste the same SSH *public* key. The script preserves AdGuard configuration and does not overwrite router settings.
+The family-facing multisite CCTV dashboard belongs in Hestoria. Hikvision remote playback may initially continue through iVMS-4200; Hestoria should provide the unified family workflow rather than duplicate NVR recording.
 
-### Alpine does not install `sudo` by default
-
-When your prompt ends with `#`, you are already root and run commands directly (for example `apk update`). From your normal `keiki` account, use `doas apk update`: the bootstrap installs `doas` and grants the configured admin the `wheel` group. Verify from the non-root account with `doas id`. You may explicitly install `sudo` with `apk add sudo` as root if you prefer, but `doas` uses less space on this 8GB edge device.
-
-### AdGuard `executable is not a regular file`
-
-Older bootstrap versions used `-x /opt/adguardhome/AdGuardHome` to detect the program. A directory also satisfies `-x`, so a partially extracted archive could be mistaken for a valid executable. The current bootstrap validates a real ELF executable, downloads and checks the official release checksum, then installs only the binary from the archive. If an invalid target already exists, it is **moved into a timestamped `/opt/adguardhome/AdGuardHome.invalid.*` backup**; it is not deleted. It does not touch `/etc/adguardhome` or `/var/lib/adguard`.
-
-To inspect the system without making changes:
+## Development
 
 ```sh
-ls -ld /opt/adguardhome /opt/adguardhome/AdGuardHome
-find /opt/adguardhome -maxdepth 4 -name AdGuardHome -print
+bash tests/contract.sh
+shellcheck -x bootstrap.sh configure-netbird.sh finalize-ssh.sh enable-firewall.sh provision.sh lib/edge-lib.sh tests/contract.sh
+git diff --check
 ```
 
-After fetching the updated script, rerun with the **existing** admin username and public key. Do not delete any directory manually.
+GitHub Actions runs the same gates.

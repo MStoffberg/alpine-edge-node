@@ -3,9 +3,16 @@
 set -Eeuo pipefail
 [ "$(id -u)" -eq 0 ] || { echo 'Run as root/doas.' >&2; exit 1; }
 user="${1:?Usage: bash finalize-ssh.sh edgeadmin}"
-[ "$user" != root ] && id "$user" >/dev/null 2>&1 || { echo 'Unknown/non-admin user.' >&2; exit 1; }
+if [ "$user" = root ] || ! id "$user" >/dev/null 2>&1; then
+  echo 'Unknown/non-admin user.' >&2
+  exit 1
+fi
 printf '%s\n' "$user" | grep -Eq '^[a-z_][a-z0-9_-]{0,30}$' || exit 1
-[ -s "/home/$user/.ssh/authorized_keys" ] || { echo 'Missing authorized_keys.' >&2; exit 1; }
+user_home="$(awk -F: -v user="$user" '$1 == user {print $6; exit}' /etc/passwd)"
+if [ -z "$user_home" ] || [ ! -s "$user_home/.ssh/authorized_keys" ]; then
+  echo 'Missing authorized_keys.' >&2
+  exit 1
+fi
 [ -f /etc/ssh/sshd_config ] || { echo 'Missing sshd_config.' >&2; exit 1; }
 printf 'Keep old SSH/console access. Confirm key login works in a SECOND session.\n'
 read -r -p 'Type TESTED to continue: ' answer
