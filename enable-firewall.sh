@@ -10,10 +10,6 @@ LAN_CIDR="$(ip -4 route show dev "$LAN_IF" scope link | awk '$1 ~ /^[0-9]+\./ &&
 [ -n "$LAN_CIDR" ] || { echo 'Could not find LAN subnet.' >&2; exit 1; }
 printf '%s\n' "$LAN_IF" | grep -Eq '^[A-Za-z0-9_.-]+$' || exit 1
 printf '%s\n' "$LAN_CIDR" | grep -Eq '^[0-9.]+/[0-9]{1,2}$' || exit 1
-if nft list table inet edge_input >/dev/null 2>&1; then
-  echo 'edge_input firewall is already active; refusing to overwrite it.'
-  exit 0
-fi
 printf '\nLocal interface: %s, subnet %s\n' "$LAN_IF" "$LAN_CIDR"
 printf 'Host firewall allows LAN/NetBird SSH, AdGuard web UI, DNS.\n'
 printf 'It does NOT block forwarded NetBird-to-NVR traffic; NetBird manages resource policies.\n'
@@ -46,10 +42,7 @@ description="Private edge host firewall (only table inet edge_input)"
 depend() { need net; before netbird; }
 start() {
   ebegin "Installing edge host firewall"
-  if nft list table inet edge_input >/dev/null 2>&1; then
-    eend 0
-    return 0
-  fi
+  nft delete table inet edge_input 2>/dev/null || true
   nft -f /etc/edge-node/firewall.nft
   eend $?
 }
@@ -60,6 +53,7 @@ stop() {
 }
 SERVICE
 chmod 755 /etc/init.d/edge-firewall
+rc-service edge-firewall stop >/dev/null 2>&1 || true
 rc-service edge-firewall start || exit 1
 rc-update add edge-firewall default
 printf '\nFirewall enabled, and will be restored on reboot.\n'
