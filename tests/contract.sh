@@ -22,6 +22,7 @@ check 'scripts contain no NetBird setup key' bash -c '! grep -E "setup-key[[:spa
 check 'no script overwrites authorized_keys' bash -c '! grep -E ">[[:space:]]*\"?[^[:space:]]*authorized_keys" -- *.sh'
 check 'NetBird unenrolled state is explicit' grep -q 'installed but not enrolled' configure-netbird.sh
 check 'firewall uses an isolated table' grep -q 'table inet edge_input' enable-firewall.sh
+check 'firewall allows NetBird direct-peer UDP' grep -q 'udp dport 51820 accept' enable-firewall.sh
 check 'firewall never creates a forward hook' bash -c '! grep -E "hook[[:space:]]+forward" enable-firewall.sh'
 check 'provision never performs same-session SSH hardening' bash -c '! grep -Eq "bash .*finalize-ssh|TESTED" provision.sh && ! grep -q -- "--harden-ssh" provision.sh'
 check 'provision requires an immutable commit' grep -q '\^\[a-f0-9\]{40}\$' provision.sh

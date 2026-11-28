@@ -27,6 +27,7 @@ table inet edge_input {
     ip protocol icmp accept
     meta l4proto ipv6-icmp accept
     iifname "$LAN_IF" udp sport 67 udp dport 68 accept
+    udp dport 51820 accept comment "NetBird WireGuard direct peers"
     iifname "$LAN_IF" ip saddr $LAN_CIDR tcp dport { 22, 53, 80, 3000 } accept
     iifname "$LAN_IF" ip saddr $LAN_CIDR udp dport 53 accept
     iifname "wt0" tcp dport { 22, 53, 80, 3000 } accept
