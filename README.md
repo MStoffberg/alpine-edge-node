@@ -24,18 +24,18 @@ The scripts do not partition disks, change interface configuration, become a DHC
 
 ## Phase 1: one-line provisioning
 
-Replace `<REVIEWED_COMMIT>` with the reviewed 40-character commit. Run as root from the Alpine console.
+These commands are pinned to the reviewed 40-character commit. Run them as root from the Alpine console.
 
 ### Loki
 
 ```sh
-COMMIT=<REVIEWED_COMMIT>; apk add --no-cache bash curl ca-certificates && curl -fsSL "https://raw.githubusercontent.com/MStoffberg/alpine-edge-node/$COMMIT/provision.sh" | bash -s -- --repo-commit "$COMMIT" --hostname loki --admin-user keiki --ssh-key-url https://github.com/MStoffberg.keys --enable-firewall
+COMMIT=81224a0aa45962d421f0e30a3c1f169d8afcfde4; apk add --no-cache bash curl ca-certificates && curl -fsSL "https://raw.githubusercontent.com/MStoffberg/alpine-edge-node/$COMMIT/provision.sh" | bash -s -- --repo-commit "$COMMIT" --hostname loki --admin-user keiki --ssh-key-url https://github.com/MStoffberg.keys --enable-firewall
 ```
 
 ### Freya
 
 ```sh
-COMMIT=<REVIEWED_COMMIT>; apk add --no-cache bash curl ca-certificates && curl -fsSL "https://raw.githubusercontent.com/MStoffberg/alpine-edge-node/$COMMIT/provision.sh" | bash -s -- --repo-commit "$COMMIT" --hostname freya --admin-user keiki --ssh-key-url https://github.com/MStoffberg.keys --enable-firewall
+COMMIT=81224a0aa45962d421f0e30a3c1f169d8afcfde4; apk add --no-cache bash curl ca-certificates && curl -fsSL "https://raw.githubusercontent.com/MStoffberg/alpine-edge-node/$COMMIT/provision.sh" | bash -s -- --repo-commit "$COMMIT" --hostname freya --admin-user keiki --ssh-key-url https://github.com/MStoffberg.keys --enable-firewall
 ```
 
 The command is rerunnable. It configures the OS, SSH keys, AdGuard, NetBird service, health checks, and firewall, but deliberately leaves current SSH recovery methods enabled.
@@ -52,7 +52,7 @@ nslookup example.com <edge-ip>
 Only after that succeeds, download `finalize-ssh.sh` from the **same commit**, inspect it, and run it locally through `doas` or the physical console:
 
 ```sh
-COMMIT=<REVIEWED_COMMIT>
+COMMIT=81224a0aa45962d421f0e30a3c1f169d8afcfde4
 curl -fsSLo /tmp/finalize-ssh.sh "https://raw.githubusercontent.com/MStoffberg/alpine-edge-node/$COMMIT/finalize-ssh.sh"
 bash -n /tmp/finalize-ssh.sh
 doas bash /tmp/finalize-ssh.sh keiki
