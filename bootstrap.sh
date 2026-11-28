@@ -318,7 +318,7 @@ if [ -f /etc/conf.d/syslog ]; then
   fi
   rc-service syslog restart >/dev/null 2>&1 || true
 fi
-lan_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}')"
+lan_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="src") {print $(i+1)}}')"
 info 'Bootstrap complete. Existing SSH remains available until you explicitly finalize it.'
 printf 'AdGuard wizard: http://%s:3000\n' "$lan_ip"
 printf 'Next: configure-netbird.sh; test SSH key in a NEW session; finalize-ssh.sh; optional enable-firewall.sh.\n'

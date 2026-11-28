@@ -43,6 +43,7 @@ check 'firewall does not abandon partial existing state' bash -c '! grep -q "alr
 check 'firewall reloads its own stale table' grep -q '^rc-service edge-firewall stop' enable-firewall.sh
 # shellcheck disable=SC2016
 check 'firewall service start replaces its own table' bash -c '[[ $(grep -c "nft delete table inet edge_input" enable-firewall.sh) -ge 2 ]]'
+check 'route lookup avoids pipefail SIGPIPE' bash -c '! grep -q "ip -4 route get.*awk.*exit" bootstrap.sh'
 
 # Real append/dedupe behavior against a temporary root fixture.
 tmp=$(mktemp -d)
