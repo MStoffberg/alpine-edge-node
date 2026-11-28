@@ -40,9 +40,14 @@ check 'AdGuard ownership repair follows first-run block' grep -q 'edge-bootstrap
 check 'AdGuard runtime UID uses procfs' grep -q '/proc/.*/status' bootstrap.sh
 check 'AdGuard program directory is traversable' grep -q 'chmod 755 /opt/adguardhome' bootstrap.sh
 check 'firewall does not abandon partial existing state' bash -c '! grep -q "already active; refusing" enable-firewall.sh'
-check 'firewall reloads its own stale table' grep -q '^rc-service edge-firewall stop' enable-firewall.sh
+check 'firewall reload avoids stop/start SSH gap' bash -c '! grep -q "^rc-service edge-firewall stop" enable-firewall.sh && grep -q "rc-service edge-firewall reload" enable-firewall.sh'
+check 'firewall replacement is one nft transaction file' bash -c 'grep -q "mktemp /run/edge-firewall" enable-firewall.sh && grep -q "nft -f.*transaction" enable-firewall.sh && ! grep -q "| nft -f -" enable-firewall.sh'
 # shellcheck disable=SC2016
-check 'firewall service start replaces its own table' bash -c '[[ $(grep -c "nft delete table inet edge_input" enable-firewall.sh) -ge 2 ]]'
+check 'firewall validates the replacement transaction' grep -q 'nft -c -f "$transaction"' enable-firewall.sh
+# shellcheck disable=SC2016
+check 'firewall transaction permissions fail closed' grep -q 'chmod 600 "$transaction" ||' enable-firewall.sh
+# shellcheck disable=SC2016
+check 'firewall boot registration follows successful activation' bash -c 'apply=$(grep -n "rc-service edge-firewall reload" enable-firewall.sh | tail -1 | cut -d: -f1); register=$(grep -n "rc-update add edge-firewall" enable-firewall.sh | tail -1 | cut -d: -f1); [[ -n $apply && -n $register && $register -gt $apply ]]'
 check 'route lookup avoids pipefail SIGPIPE' bash -c '! grep -q "ip -4 route get.*awk.*exit" bootstrap.sh'
 
 # Real append/dedupe behavior against a temporary root fixture.
